@@ -1,6 +1,7 @@
 import websockets
 import asyncio
 import aiohttp
+import datetime
 from stashio.utils.auth import Auth
 from stashio.irc.channel_manager import ChannelManager
 from stashio.irc.user_manager import UserManager
@@ -66,28 +67,39 @@ class StashioTwitchBot():
         
         while not self.__manual_shutdown_requested:
             async with aiohttp.ClientSession() as session:
-                async with session.ws_connect(self.__server) as websocket:
-                    self.__ws = websocket
-                    await self.__ws.send_str(f"CAP REQ :twitch.tv/commands twitch.tv/tags twitch.tv/membership")
-                    await self.__ws.send_str(f"PASS {self.__auth.get_irc_token()}")
-                    await self.__ws.send_str(f"NICK {self.__auth.get_user()}")
-                    async for rec in websocket:
-                        if rec.type == aiohttp.WSMsgType.TEXT:
-                            self.__data += rec.data
-                        elif rec.type == aiohttp.WSMsgType.ERROR:
-                            print("Received error")
-                            break
-                        else:
-                            print("========================")
-                            print("Unexpected data type:",rec.type)
-                            print(rec.data)
-                            print("========================")
-                            
+                try:
+                    async with session.ws_connect(self.__server) as websocket:
+                        self.__ws = websocket
+                        await self.__ws.send_str(f"CAP REQ :twitch.tv/commands twitch.tv/tags")
+                        await self.__ws.send_str(f"PASS {self.__auth.get_irc_token()}")
+                        await self.__ws.send_str(f"NICK {self.__auth.get_user()}")
+                        async for rec in websocket:
+                            now = datetime.datetime.now()
+                            timestamp = now.strftime("%m/%d/%Y %H:%M:%S")
+                            if rec.type == aiohttp.WSMsgType.TEXT:
+                                self.__data += rec.data
+                            elif rec.type == aiohttp.WSMsgType.ERROR:
+                                print("Received error")
+                                break
+                            else:
+                                print("========================")
+                                print("Unexpected data type:",rec.type)
+                                print(rec.data)
+                                print("========================")
+                                
+                            if self.__manual_shutdown_requested:
+                                break
                         if self.__manual_shutdown_requested:
                             break
-                    if self.__manual_shutdown_requested:
-                        break
+                except aiohttp.ClientConnectorError:
+                    print("Failed to connect, trying again.")
 
+    def get_data(self):
+        return self.__data
+        
+    def get_msr(self):
+        return self.__manual_shutdown_requested
+        
     async def process_recv_data(self):
         while not self.__manual_shutdown_requested:
             if len(self.__data) > 0:
@@ -96,9 +108,26 @@ class StashioTwitchBot():
                 # if it does end in it, the last message will be empty anyway, so we'll be clearing __data
                 self.__data = messages[-1]
                 for i in range(len(messages) - 1):
-                    m = IRCData(messages[i])
-                    await self.process_irc_packet(m)
-            await asyncio.sleep(0.01)
+                    try:
+                        m = IRCData(messages[i])
+                    except Exception as e:
+                        print("==================================")
+                        print("EXCEPTION CREATING IRC DATA!")
+                        print("Exception:",str(e))
+                        print("Message:",messages[i])
+                        print("==================================")
+                        
+                    try:
+                        await self.process_irc_packet(m)
+                    except Exception as e:
+                        print("==================================")
+                        print("EXCEPTION PROCESSING IRC PACKET!")
+                        print("Exception:",str(e))
+                        print("Message:",messages[i])
+                        print("Message object:",m)
+                        print("==================================")
+                        
+            await asyncio.sleep(0)
             
     async def process_send_data(self):
         wait_queue = []
@@ -116,7 +145,6 @@ class StashioTwitchBot():
                 out = []
                 
                 for item in items_to_check:
-                    # TODO: Need to finish message rate stuff
                     #if item.queue_type() == IRCPackets.QueueType.PRIVMSG:
                     #    global_count = msg_rate_queue.get_count()
                     #    
@@ -130,14 +158,17 @@ class StashioTwitchBot():
                     
                 for p in out:
                     await self.__ws.send_str(p)
+                    await asyncio.sleep(0)
                             
             except aiohttp.ClientDisconnectedError:
                 continue
-            await asyncio.sleep(0.01)
+                
+            await asyncio.sleep(0)
             
     async def process_irc_packet(self, message):
         if message.command == "001":
             await self.event_authenticated()
+            #await self.join_channel("smcharles")
         elif message.command == "PING":
             await self.__ws.send_str(f"PONG :{message.content}")
         elif message.command == "PRIVMSG":
@@ -204,3 +235,4 @@ class StashioTwitchBot():
     # This event gets called when twitch is going to go down for maintenance
     async def event_reconnect(self):
         pass
+        

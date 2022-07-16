@@ -29,6 +29,10 @@ class IRCData():
                 self.message["source"]["host"] = splitSource[1] if len(splitSource) > 1 else splitSource[0]
 
             self.__parse_command(cmd, params)
+            if self.command == "PRIVMSG":
+                m2 = re.fullmatch("^\x01ACTION (?P<message>.+)\x01$", self.content)
+                if m2:
+                    self.message["content"] = "/me " + m2.group("message")
             
     def __repr__(self):
         return str(self.message)
@@ -113,9 +117,9 @@ class IRCData():
         
     def __parse_tags(self, raw_tags):
         tags = raw_tags.split(";")
-
+        
         for tag in tags:
-            key, val = tag.split('=')
+            key, val = tag.split('=', 1)
             
             if len(val) == 0:
                 val = None
@@ -127,13 +131,15 @@ class IRCData():
                 badges = val.split(',')
                 
                 for badge in badges:
-                    badge_name, metadata = badge.split('/')
+                    badge_name, metadata = badge.split('/', 1)
                     
                     if not badge_name in self.message["badges"]:
                         self.message["badges"][badge_name] = dict()
                         
                     if key == "badge-info" and badge_name == "subscriber":
                         self.message["badges"][badge_name]["months"] = metadata
+                    elif key == "badge-info" and badge_name == "predictions":
+                        self.message["badges"][badge_name]["prediction_name"] = metadata
                     else:
                         self.message["badges"][badge_name]["version"] = metadata
             elif val is not None and key == "emotes":
@@ -148,7 +154,7 @@ class IRCData():
         out_emotes = dict()
         
         for emote in emotes:
-            id, all_ranges = emote.split(':')
+            id, all_ranges = emote.split(':', 1)
             
             if not id in out_emotes:
                 out_emotes[id] = []
@@ -156,7 +162,7 @@ class IRCData():
             ranges = all_ranges.split(',')
             
             for range in ranges:
-                start, end = range.split('-')
+                start, end = range.split('-', 1)
                 out_emotes[id].append({'start': start, 'end': end})
                 
         return out_emotes

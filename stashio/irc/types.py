@@ -60,6 +60,10 @@ class TwitchMessage():
         return self.__content
         
     @property
+    def display_name(self):
+        return self.__display_name
+        
+    @property
     def emote_data(self):
         return self.__emote_data
         
