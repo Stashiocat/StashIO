@@ -1,10 +1,5 @@
 from twitch.api import TwitchApi
 
-# This is a WIP
-# This is not currently used and I might scrap this or re-write it
-# The original idea was to cache user ID <==> twitch name
-# You really don't want to store things by twitch name because users can swap that out from under you
-# so always try to cache off user IDs instead. but sometimes you need to convert between the two.
 class UserBank():
     def __init__(self, in_twitch_api, in_bank_path='data/userbank.dat'):
         self.__api = in_twitch_api

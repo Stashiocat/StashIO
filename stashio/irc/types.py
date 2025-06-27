@@ -25,10 +25,10 @@ class TwitchMessage():
         self.__color = in_irc_data.message["color"]
         self.__content = in_irc_data.message["content"]
         self.__emote_data = in_irc_data.message["emotes"]
-        self.__first_msg = in_irc_data.message["first-msg"]
+        self.__first_msg = in_irc_data.message["first-msg"] if "first-msg" in in_irc_data.message else '0'
         self.__message_id = in_irc_data.message["id"]
         self.__mod = in_irc_data.message["mod"]
-        self.__returning_chatter = in_irc_data.message["returning-chatter"]
+        self.__returning_chatter = in_irc_data.message["returning-chatter"] if "returning-chatter" in in_irc_data.message else '0'
         self.__time_sent = in_irc_data.message["tmi-sent-ts"]
         self.__turbo = in_irc_data.message["turbo"]
         self.__user_type = in_irc_data.message["user-type"]
@@ -95,9 +95,9 @@ class TwitchMessage():
     def time_sent(self):
         return self.__time_sent
         
-    async def reply(self, in_reply_message):
+    async def reply(self, in_reply_message, in_delay = 0):
         if self.__reply_callback:
-            await self.__reply_callback(self.__message_id, self.channel, in_reply_message)
+            await self.__reply_callback(self.__message_id, self.channel, in_reply_message, in_delay)
         
 class TwitchChannel():
     def __init__(self, in_irc_data):

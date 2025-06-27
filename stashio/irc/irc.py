@@ -191,9 +191,17 @@ class IRCPackets():
                 if message[0:3] == '/me':
                     message = '\x01ACTION ' + message[3:] + '\x01'
                 else:
-                    message = re.sub("^/+", "", message)
+                    message = re.sub("^(/\s*)+", "", message)
+            if message[0] == '.':
+                message = re.sub("^(\.\s*)+", "", message)
             reply = f"@reply-parent-msg-id={reply_id}" if reply_id else ""
             self.__packet = f"{reply} PRIVMSG #{channel.name} :{message}".strip()
+            
+        def __lt__(self, other):
+            return self.get() < other.get()
+            
+        def __le__(self, other):
+            return self.get() <= other.get()
             
         def get(self):
             return self.__packet
@@ -209,6 +217,12 @@ class IRCPackets():
         def __init__(self, channel):
             self.__packet = f"JOIN #{channel}"
             
+        def __lt__(self, other):
+            return self.get() < other.get()
+            
+        def __le__(self, other):
+            return self.get() <= other.get()
+            
         def get(self):
             return self.__packet
             
@@ -219,6 +233,12 @@ class IRCPackets():
         def __init__(self, channel):
             self.__packet = f"PART #{channel}"
             
+        def __lt__(self, other):
+            return self.get() < other.get()
+            
+        def __le__(self, other):
+            return self.get() <= other.get()
+            
         def get(self):
             return self.__packet
             
@@ -228,6 +248,12 @@ class IRCPackets():
     class ChangeColor(Packet):
         def __init__(self, color):
             self.__packet = f"PRIVMSG #jtv :.color {color}"
+            
+        def __lt__(self, other):
+            return self.get() < other.get()
+            
+        def __le__(self, other):
+            return self.get() <= other.get()
             
         def get(self):
             return self.__packet

@@ -2,7 +2,10 @@
 class RoomState():
     def __init__(self, in_room_state_packet):
         self.update_state(in_room_state_packet)
-
+        
+    def __repr__(self):
+        return "Room State (" + self.channel + "):\n  channel_id: " + str(self.channel_id) + "\n  is_emote_only:" + str(self.is_emote_only) + "\n  is_followers_only:" + str(self.is_followers_only) + "\n  slow_mode:" + str(self.slow_mode) + "\n  is_subs_only:" + str(self.is_subs_only)
+        
     def update_state(self, in_room_state_packet):
         if in_room_state_packet.channel:
             self.__channel = in_room_state_packet.channel
@@ -44,7 +47,10 @@ class RoomState():
 class UserState():
     def __init__(self, in_user_state_packet):
         self.update_state(in_user_state_packet)
-
+        
+    def __repr__(self):
+        return "User State (" + self.channel + "):\n  is_mod: " + str(self.is_mod) + "\n  is_subscriber:" + str(self.is_subscriber)
+        
     def update_state(self, in_user_state_packet):
         if in_user_state_packet.channel:
             self.__channel = in_user_state_packet.channel
@@ -76,24 +82,33 @@ class Channel():
         self.__user_state = None
         self.__room_state = None
         
+    def __repr__(self):
+        return str(self.__user_state) + "\n" + str(self.__room_state)
+        
     def update_user_state(self, in_user_state):
         if not self.__user_state:
             self.__user_state = UserState(in_user_state)
         else:
             self.__user_state.update_state(in_user_state)
+        return self
         
     def update_room_state(self, in_room_state):
         if not self.__room_state:
             self.__room_state = RoomState(in_room_state)
         else:
             self.__room_state.update_state(in_room_state)
+        return self
         
-    async def send(self, in_message):
-        await self.__send_callback(self, in_message)
+    async def send(self, in_message, in_delay = 0):
+        await self.__send_callback(self, in_message, in_delay)
         
     @property
     def name(self):
-        return "Unknown Channel Name" if not self.__room_state else self.__room_state.channel
+        if self.__room_state:
+            return self.__room_state.channel
+        if self.__user_state:
+            return self.__user_state.channel
+        return None
         
     @property
     def is_mod(self):
@@ -139,11 +154,14 @@ class ChannelManager():
         
     async def set_channel_user_state(self, in_user_state):
         chan = self.__add_or_find_channel(in_user_state.channel_id)
-        chan.update_user_state(in_user_state)
+        return chan.update_user_state(in_user_state)
         
     async def set_channel_room_state(self, in_room_state):
         chan = self.__add_or_find_channel(in_room_state.channel_id)
-        chan.update_room_state(in_room_state)
+        return chan.update_room_state(in_room_state)
         
     async def get_channel(self, in_channel_id):
         return self.__channel_cache[in_channel_id] if in_channel_id in self.__channel_cache else None
+
+    def is_mod(self, in_channel_id):
+        return self.__channel_cache[in_channel_id].is_mod if in_channel_id in self.__channel_cache else False

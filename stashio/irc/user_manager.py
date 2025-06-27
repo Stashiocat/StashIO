@@ -54,24 +54,29 @@ class User():
         return self.__display_name
         
     @property
-    def is_mod(self, in_channel_object):
-        return in_channel_object.channel_id in self.__role_cache and self.__role_cache[in_channel_object.channel_id].is_mod
+    def is_mod(self, channel_id):
+        return channel_id in self.__role_cache and self.__role_cache[channel_id].is_mod
         
     @property
-    def is_subscriber(self, in_channel_object):
-        return in_channel_object.channel_id in self.__role_cache and self.__role_cache[in_channel_object.channel_id].is_subscriber
+    def is_subscriber(self, channel_id):
+        return channel_id in self.__role_cache and self.__role_cache[channel_id].is_subscriber
         
     @property
-    def is_vip(self, in_channel_object):
-        return in_channel_object.channel_id in self.__role_cache and self.__role_cache[in_channel_object.channel_id].is_vip
+    def is_vip(self, channel_id):
+        return channel_id in self.__role_cache and self.__role_cache[channel_id].is_vip
         
     @property
-    def is_broadcaster(self, in_channel_object):
-        return in_channel_object.channel_id in self.__role_cache and self.__role_cache[in_channel_object.channel_id].is_broadcaster
+    def is_broadcaster(self, channel_id):
+        return channel_id in self.__role_cache and self.__role_cache[channel_id].is_broadcaster
+
+    @property
+    def channel_id(self):
+        return self.__user_id
 
 class UserManager():
     def __init__(self):
         self.__user_cache = dict()
+        self.__user_name_to_id = dict()
         
     def __repr__(self):
         return str(self.__user_cache)
@@ -80,6 +85,8 @@ class UserManager():
         user_id = in_privmsg_data.user_id
         if not user_id in self.__user_cache:
             self.__user_cache[user_id] = User(in_privmsg_data)
+            assert(in_privmsg_data.name not in self.__user_name_to_id)
+            self.__user_name_to_id[in_privmsg_data.name] = user_id
         return self.__user_cache[user_id]
         
     async def set_user_data(self, in_privmsg_data):
@@ -89,3 +96,5 @@ class UserManager():
     async def get_user(self, in_user_id):
         return self.__user_cache[in_user_id] if in_user_id in self.__user_cache else None
         
+    def get_channel_id_from_name(self, in_user_name):
+        return self.__user_name_to_id[in_user_name] if in_user_name in self.__user_name_to_id else None
