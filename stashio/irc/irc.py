@@ -1,261 +1,102 @@
-import re
+import asyncio
+import traceback
+from stashio.utils.auth import Auth
+from stashio.irc.channel_manager import ChannelManager
+from stashio.irc.user_manager import UserManager
+from stashio.irc.types import TwitchMessage, IRCData, IRCPackets
+from stashio.connection.wss_connection import BaseConnection
+from stashio.twitch.api import TwitchApi
 
-class IRCData():
-    def __init__(self, in_raw_message):
-        #initialization
-        self.message = dict()
+class IRC(BaseConnection):
+    def __init__(self, in_bot, in_auth, in_twitch_api: TwitchApi, in_server='wss://irc-ws.chat.twitch.tv:443'):
+        super().__init__(in_server)
+        # auth data
+        self.__auth = in_auth
+        # twitch api interface
+        self.__api = in_twitch_api
+        # manages user objects that contain info about the user and its roles in channels
+        self.__user_manager = UserManager()
+        # manages channel objects that contain info about the channel and the bot's roles in the channel
+        self.__channel_manager = ChannelManager(self.__message_send_callback)
+        # asyncio event loop
+        self.__loop = asyncio.get_event_loop()
+        # the bot, for calling events
+        self.__bot = in_bot
         
-        #parse
-        pattern = "^(?P<tags>@[^ ]+)? ?(?P<source>:[^ ]+)? ?(?P<command>[^:]+):?(?P<params>.+?)?$"
-        m = re.fullmatch(pattern, in_raw_message)
-        if not m:
-            print("==============================================")
-            print("Failed to parse message")
-            print(in_raw_message)
-            print("==============================================")
-        else:
-            tags = m.group("tags")
-            source = m.group("source")
-            cmd = m.group("command")
-            params = m.group("params")
+    #############################################################
+    ## Start BaseConnection overrides
+    #############################################################        
+    async def on_connect(self):
+        await self.send(f"CAP REQ :twitch.tv/commands twitch.tv/tags")
+        await self.send(f"PASS {self.__auth.get_irc_token()}")
+        await asyncio.sleep(0.1)
+        await self.send(f"NICK {self.__auth.get_user()}")
+        
+    async def on_receive(self, data):
+        try:
+            m = IRCData(data)
+        except Exception as e:
+            print("==================================")
+            print("EXCEPTION CREATING IRC DATA!")
+            print("Exception:",str(e))
+            print("Message:",data)
+            print("==================================")
             
-            if tags:
-                self.__parse_tags(tags[1:])
-                
-            if source:
-                splitSource = source[1:].split('!')
-                self.message["source"] = dict()
-                self.message["source"]["nick"] = splitSource[0] if len(splitSource) > 1 else None
-                self.message["source"]["host"] = splitSource[1] if len(splitSource) > 1 else splitSource[0]
+        try:
+            #await self.process_irc_packet(m)
+            self.__loop.create_task(self.process_irc_packet(m))
+        except Exception as e:
+            print("==================================")
+            print("EXCEPTION PROCESSING IRC PACKET!")
+            print("Exception:",str(e))
+            print("Message:",data)
+            print("Message object:",m)
+            print("==================================")
+            
+    #############################################################
+    ## End BaseConnection overrides
+    #############################################################
 
-            self.__parse_command(cmd, params)
-            if self.command == "PRIVMSG":
-                m2 = re.fullmatch("^\x01ACTION (?P<message>.+)\x01$", self.content)
-                if m2:
-                    self.message["content"] = "/me " + m2.group("message")
+    async def process_irc_packet(self, message):
+        if message.command == "001":
+            await self.__bot.event_irc_connected()
+        elif message.command == "PING":
+            await self.send(f"PONG :{message.content}")
+        elif message.command == "PRIVMSG":
+            await self.__user_manager.set_user_data(message)
+            user = await self.__user_manager.get_user(message.user_id)
+            channel = await self.__channel_manager.get_channel(message.channel_id)
+            await self.__bot.event_irc_message(TwitchMessage(channel, user, message, self.__message_reply_callback))
+        elif message.command == "JOIN":
+            # TODO: Right now joins only give a channel name, so need a lookup by name for user and channel
+            #await self.event_irc_join(TwitchChannel(message))
+            pass
+        elif message.command == "USERSTATE":
+            updated_channel = await self.__channel_manager.set_channel_user_state(message)
+            await self.__bot.event_irc_userstate(updated_channel)
+        elif message.command == "ROOMSTATE":
+            updated_channel = await self.__channel_manager.set_channel_room_state(message)
+            await self.__bot.event_irc_roomstate(updated_channel)
+        elif message.command == "NOTICE":
+            await self.__bot.event_irc_notice(message.channel, message.content)
             
-    def __repr__(self):
-        return str(self.message)
-            
-    def __get_property(self, prop_name):
-        return self.message[prop_name] if prop_name in self.message else None
-            
-    @property
-    def command(self):
-        return self.__get_property("command")
-            
-    @property
-    def name(self):
-        return self.message["source"]["nick"]
+    async def __message_reply_callback(self, in_message_id, in_channel, in_message, in_delay = 0):
+        await self.send(IRCPackets.Message(in_channel, in_message, in_message_id).get(), in_delay)
         
-    @property
-    def display_name(self):
-        return self.__get_property("display-name")
-            
-    @property
-    def channel(self):
-        return self.__get_property("channel")
-        
-    @property
-    def channel_id(self):
-        id = self.__get_property("room-id")
-        return int(id) if id else 0
-        
-    @property
-    def user_id(self):
-        id = self.__get_property("user-id")
-        return int(id) if id else 0
-            
-    @property
-    def content(self):
-        return self.__get_property("content")
-        
-    @property
-    def badges(self):
-        return self.__get_property("badges")
-        
-    @property
-    def is_mod(self):
-        return (self.__get_property("mod") not in [None, '0']) or self.is_broadcaster
-        
-    @property
-    def is_vip(self):
-        badges = self.badges
-        if badges:
-            if 'vip' in badges:
-                return True
-        return False
-        
-    @property
-    def is_broadcaster(self):
-        badges = self.badges
-        if badges:
-            if 'broadcaster' in badges:
-                return True
-        return False
-        
-    @property
-    def is_subscriber(self):
-        return (self.__get_property("subscriber") not in [None, '0']) or self.is_broadcaster
-            
-    def __parse_command(self, command, params):
-        splitCommand = command.split(' ')
-        
-        cmd = splitCommand[0]
-        self.message["command"] = cmd
-        
-        if cmd in ["JOIN", "PART", "NOTICE", "CLEARCHAT", "HOSTTARGET", "PRIVMSG", "USERSTATE", "ROOMSTATE", "001"]:
-            if splitCommand[1][0] == '#':
-                splitCommand[1] = splitCommand[1][1:]
-            self.message["channel"] = splitCommand[1]
-            self.message["content"] = params
-        elif cmd in ["CAP"]:
-            self.message["ack"] = splitCommand[1] == "ACK"
-            self.message["capabilities"] = self.__parse_capabilities(params)
-        elif cmd in ["PING", "GLOBALUSERSTATE", "RECONNECT"]:
-            self.message["content"] = params
-        
-    def __parse_tags(self, raw_tags):
-        tags = raw_tags.split(";")
-        
-        for tag in tags:
-            key, val = tag.split('=', 1)
-            
-            if len(val) == 0:
-                val = None
-                
-            if val is not None and key in ["badge-info", "badges"]:
-                if not "badges" in self.message:
-                    self.message["badges"] = dict()
-                    
-                badges = val.split(',')
-                
-                for badge in badges:
-                    badge_name, metadata = badge.split('/', 1)
-                    
-                    if not badge_name in self.message["badges"]:
-                        self.message["badges"][badge_name] = dict()
-                        
-                    if key == "badge-info" and badge_name == "subscriber":
-                        self.message["badges"][badge_name]["months"] = metadata
-                    elif key == "badge-info" and badge_name == "predictions":
-                        self.message["badges"][badge_name]["prediction_name"] = metadata
-                    else:
-                        self.message["badges"][badge_name]["version"] = metadata
-            elif val is not None and key == "emotes":
-                self.message["emotes"] = self.__parse_emotes(val)
-            elif val is not None and key == "emote-sets":
-                self.message["emote-sets"] = val.split(',')
-            else:
-                self.message[key] = val
-                
-    def __parse_emotes(self, raw_emotes):
-        emotes = raw_emotes.split('/')
-        out_emotes = dict()
-        
-        for emote in emotes:
-            id, all_ranges = emote.split(':', 1)
-            
-            if not id in out_emotes:
-                out_emotes[id] = []
-                
-            ranges = all_ranges.split(',')
-            
-            for range in ranges:
-                start, end = range.split('-', 1)
-                out_emotes[id].append({'start': start, 'end': end})
-                
-        return out_emotes
-        
-    def __parse_capabilities(self, raw_capabilities):
-        #twitch.tv/commands twitch.tv/tags twitch.tv/membership
-        #todo: maybe get rid of the twitch.tv/ part
-        return raw_capabilities.split(' ')
-        
-        
-class IRCPackets():
-    class QueueType():
-        NONE = 0
-        PRIVMSG = 1
-        JOIN = 2
-        PART = 3
-        
-    class Packet():
-        def queue_type(self):
-            return IRCPackets.QueueType.NONE
-            
-    class Message(Packet):
-        def __init__(self, channel, message, reply_id=None):
-            self.__channel = channel
-            if message[0] == '/':
-                if message[0:3] == '/me':
-                    message = '\x01ACTION ' + message[3:] + '\x01'
-                else:
-                    message = re.sub("^(/\s*)+", "", message)
-            if message[0] == '.':
-                message = re.sub("^(\.\s*)+", "", message)
-            reply = f"@reply-parent-msg-id={reply_id}" if reply_id else ""
-            self.__packet = f"{reply} PRIVMSG #{channel.name} :{message}".strip()
-            
-        def __lt__(self, other):
-            return self.get() < other.get()
-            
-        def __le__(self, other):
-            return self.get() <= other.get()
-            
-        def get(self):
-            return self.__packet
-            
-        @property
-        def channel(self):
-            return self.__channel
+    async def __message_send_callback(self, in_channel, in_message, in_delay = 0):
+        await self.send(IRCPackets.Message(in_channel, in_message).get(), in_delay)
 
-        def queue_type(self):
-            return IRCPackets.QueueType.PRIVMSG
+    async def join_channels(self, channels):
+        try:
+            for channel in channels:
+                await self.send(IRCPackets.Join(channel).get(), 0)
+        except Exception as e:
+            traceback.print_exc()
+            
+    async def leave_channels(self, channels):
+        for channel in channels:
+            await self.send(IRCPackets.Part(channel).get(), 0)
         
-    class Join(Packet):
-        def __init__(self, channel):
-            self.__packet = f"JOIN #{channel}"
-            
-        def __lt__(self, other):
-            return self.get() < other.get()
-            
-        def __le__(self, other):
-            return self.get() <= other.get()
-            
-        def get(self):
-            return self.__packet
-            
-        def queue_type(self):
-            return IRCPackets.QueueType.JOIN
-        
-    class Part(Packet):
-        def __init__(self, channel):
-            self.__packet = f"PART #{channel}"
-            
-        def __lt__(self, other):
-            return self.get() < other.get()
-            
-        def __le__(self, other):
-            return self.get() <= other.get()
-            
-        def get(self):
-            return self.__packet
-            
-        def queue_type(self):
-            return IRCPackets.QueueType.PART
-        
-    class ChangeColor(Packet):
-        def __init__(self, color):
-            self.__packet = f"PRIVMSG #jtv :.color {color}"
-            
-        def __lt__(self, other):
-            return self.get() < other.get()
-            
-        def __le__(self, other):
-            return self.get() <= other.get()
-            
-        def get(self):
-            return self.__packet
-            
-    
+    async def RefreshIRCAccessToken(self):
+        await self.__api.RefreshIRCAccessToken()
+        await self.force_reconnect()

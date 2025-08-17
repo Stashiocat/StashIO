@@ -95,6 +95,8 @@ class Auth():
                     j = await r.json()
                     new_access_token = j['access_token']
                     new_refresh_token = j['refresh_token']
+                    if not "oauth:" in new_access_token:
+                        new_access_token = "oauth:" + new_access_token
                     self.__assign_new_irc_access_token(new_access_token, new_refresh_token)
                     return new_access_token
         except Exception as e:

@@ -1,9 +1,10 @@
 import aiohttp
 import asyncio
 import ujson
+from stashio.utils.auth import Auth
 
 class TwitchApi():
-    def __init__(self, in_auth):
+    def __init__(self, in_auth: Auth):
         self.__auth = in_auth
         
     def __get_oauth_header(self, content_type=None):
@@ -92,9 +93,9 @@ class TwitchApi():
         url = f'https://api.twitch.tv/helix/streams?type=all&first=100&user_login={channel_names_string}'
         return await self.ExecuteTwitchAPIRequest(url, all_results=True)
 
-    async def EventSub_CreateSubscription(self, in_sub_object, in_session_id):
+    async def EventSub_CreateSubscription(self, in_data):
         async with aiohttp.ClientSession(headers=self.__get_oauth_header(content_type="application/json")) as session:
             url = 'https://api.twitch.tv/helix/eventsub/subscriptions'
-            result = await self.__api_request_post_json(session, url, data=in_sub_object.GetJson(in_session_id))
+            result = await self.__api_request_post_json(session, url, data=in_data)
             return result["data"][0]
             
